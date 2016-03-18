@@ -20,6 +20,7 @@ import pwd, grp
 import traceback
 import uuid
 import yaml
+import re
 
 def signal_handler(signal, frame):
     sys.exit(0)
@@ -1655,7 +1656,7 @@ class InstallKairosdbCmd(Command):
     def install_argparse_arguments(self, parser):
         parser.add_argument('--file', help='path to the %s' % self.PACKAGE_NAME, required=False)
         parser.add_argument('--listen-address', help='the IP kairosdb listens to, which cannot be 0.0.0.0', required=True)
-        parser.add_argument('--cassandra-rpc-address', help='the RPC address of cassandra, which must be in the format of'
+        parser.add_argument('--cassandra_rpc_address', help='the RPC address of cassandra, which must be in the format of'
                                                             '\nIP:port, for example, 192.168.0.199:9160. If omitted, the'
                                                             '\naddress will be retrieved from local cassandra YAML config,'
                                                             '\nor an error will be raised if the YAML config cannot be found', required=False)
@@ -1691,12 +1692,12 @@ class InstallKairosdbCmd(Command):
                 all_configs.append(l)
 
         if args.cassandra_rpc_address and ':' not in args.cassandra_rpc_address:
-            raise CtlError('invalid --cassandra-rpc-address[%s]. It must be in the format of IP:port' % args.cassandra_rpc_address)
+            raise CtlError('invalid --cassandra_rpc_address[%s]. It must be in the format of IP:port' % args.cassandra_rpc_address)
         elif not args.cassandra_rpc_address:
             cassandra_conf = ctl.get_env(InstallCassandraCmd.CASSANDRA_CONF)
             if not cassandra_conf:
                 raise CtlError('cannot find cassandra conf[%s] in %s, have you installed cassandra? or'
-                               ' you can use --cassandra-rpc-address to set the address explicitly' % (InstallCassandraCmd.CASSANDRA_CONF, SetEnvironmentVariableCmd.PATH))
+                               ' you can use --cassandra_rpc_address to set the address explicitly' % (InstallCassandraCmd.CASSANDRA_CONF, SetEnvironmentVariableCmd.PATH))
 
             with open(cassandra_conf, 'r') as fd:
                 with on_error('cannot YAML load %s, it seems corrupted' % InstallCassandraCmd.CASSANDRA_CONF):
@@ -1738,6 +1739,102 @@ class InstallKairosdbCmd(Command):
         shell('''sed -i 's/<root level="DEBUG">/<root level="INFO">/g' %s''' % log_conf)
 
         info('successfully installed kairosdb, the config file is written to %s' % original_conf_path)
+
+class ChangeIpCmd(Command):
+    def __init__(self):
+        super(ChangeIpCmd, self).__init__()
+        self.name = "change_ip"
+        self.description = (
+            "update new ip address to zstack property file, kairosdb and cassandra config file"
+        )
+        ctl.register_command(self)
+
+    def install_argparse_arguments(self, parser):
+        parser.add_argument('--ip', help='The new IP address of management node.'
+                                         'This operation will update the new ip address to'
+                                         'zstack, kaiorsdb and cassandra config file' , required=True)
+        parser.add_argument('--kairosdb_ip', help='The new IP address of kairosdb', required=False)
+        parser.add_argument('--cassandra_rpc_address', help='The new IP address of cassandra_rpc_address', required=False)
+        parser.add_argument('--cassandra_listen_address', help='The new IP address of cassandra_listen_address', required=False)
+        parser.add_argument('--cloudbus_server_ip', help='The new IP address of CloudBus.serverIp.0', required=False)
+        parser.add_argument('--mysql_ip', help='The new IP address of DB.url', required=False)
+
+    def run(self, args):
+        if args.ip == '0.0.0.0':
+            raise CtlError('for your data safety, please do NOT use 0.0.0.0 as the listen address')
+        if args.kairosdb_ip is not None:
+            kairosdb_ip = args.kaiorsdb-ip
+        else:
+            kairosdb_ip = args.ip
+        if args.cassandra_rpc_address is not None:
+            cassandra_rpc_address = args.cassandra_rpc_address
+        else:
+            cassandra_rpc_address = args.ip
+        if args.cassandra_listen_address is not None:
+            cassandra_listen_address = args.cassandra_listen_address
+        else:
+            cassandra_listen_address = args.ip
+        if args.cloudbus_server_ip is not None:
+            cloudbus_server_ip = args.cloud-bus-server-ip
+        else:
+            cloudbus_server_ip = args.ip
+        if args.mysql_ip is not None:
+            mysql_ip = args.mysql_ip
+        else:
+            mysql_ip = args.ip
+
+	zstack_conf_file = ctl.properties_file_path
+
+        # Update zstack config file
+        shell("yes | cp %s %s.bak" % (zstack_conf_file, zstack_conf_file))
+        ctl.write_properties([
+          ('CloudBus.serverIp.0', cloudbus_server_ip),
+        ])
+        info("Update cloudbus server ip %s in %s " % (cloudbus_server_ip, zstack_conf_file))
+        db_url = ctl.read_property('DB.url')
+        db_old_ip = re.findall(r'[0-9]+(?:\.[0-9]{1,3}){3}', db_url)
+        db_new_url = db_url.split(db_old_ip[0])[0] + mysql_ip + db_url.split(db_old_ip[0])[1]
+        ctl.write_properties([
+          ('DB.url', db_new_url),
+        ])
+        info("Update mysql new url %s in %s " % (db_new_url, zstack_conf_file))
+
+        # Update kairosdb config file
+        kairosdb_dir = os.path.join(ctl.USER_ZSTACK_HOME_DIR, "kairosdb")
+        if os.path.exists(kairosdb_dir):
+            kairosdb_conf_file = os.path.join(kairosdb_dir, "conf/kairosdb.properties")
+            shell("yes | cp %s %s.bak" % (kairosdb_conf_file, kairosdb_conf_file))
+            new_kairosdb_config = []
+            new_kairosdb_config.extend([
+              ('kairosdb.jetty.address', kairosdb_ip),
+              ('kairosdb.datastore.cassandra.host_list', kairosdb_ip)
+            ])
+            prop = PropertyFile(kairosdb_conf_file)
+            prop.write_properties(new_kairosdb_config)
+            info("Update new ip address %s in %s " % (kairosdb_ip, kairosdb_conf_file))
+            ctl.write_properties([
+              ('Kairosdb.ip', kairosdb_ip),
+            ])
+            info("Update kairosdb ip %s in %s " % (kairosdb_ip, zstack_conf_file))
+
+        # Update cassandra config file
+        cassandra_dir = os.path.join(ctl.USER_ZSTACK_HOME_DIR, "apache-cassandra-2.2.3")
+        if os.path.exists(cassandra_dir):
+            cassandra_conf_file = os.path.join(cassandra_dir, "conf/cassandra.yaml")
+            shell('yes | cp %s %s.bak' % (cassandra_conf_file, cassandra_conf_file))
+        with use_user_zstack():
+            with open(cassandra_conf_file, 'r') as fd:
+                c_conf = yaml.load(fd.read())
+                c_conf['listen_address'] = cassandra_listen_address
+                c_conf['rpc_address'] = cassandra_rpc_address
+                with open(cassandra_conf_file, 'w') as fd:
+                    fd.write(yaml.dump(c_conf, default_flow_style=False))
+                    info('Update cassandra listen address: %s rpc_address: %s in %s' \
+                         % (cassandra_listen_address, cassandra_rpc_address, cassandra_conf_file))
+                    ctl.write_properties([
+                        ('Cassandra.contactPoints', cassandra_rpc_address)
+                    ])
+                    info("Update cassandra rpc address: %s in %s" % (cassandra_rpc_address, zstack_conf_file))
 
 class InstallCassandraCmd(Command):
     CASSANDRA_EXEC = 'CASSANDRA_EXEC'
@@ -1875,7 +1972,7 @@ class KairosdbCmd(Command):
 
         exe = ctl.get_env(InstallKairosdbCmd.KAIROSDB_EXEC)
         if not os.path.exists(exe):
-            raise CtlError('cannot find the variable[%s] in %s. Have you installed kaiosdb?' %
+            raise CtlError('cannot find the variable[%s] in %s. Have you installed kairosdb?' %
                            (InstallKairosdbCmd.KAIROSDB_EXEC, SetEnvironmentVariableCmd.PATH))
 
         shell('bash %s start' % exe)
@@ -3400,6 +3497,7 @@ def main():
     UnsetEnvironmentVariableCmd()
     RestartNodeCmd()
     DeployCassandraDbCmd()
+    ChangeIpCmd()
 
     try:
         ctl.run()
@@ -3410,4 +3508,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
