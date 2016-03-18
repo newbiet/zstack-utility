@@ -1656,7 +1656,7 @@ class InstallKairosdbCmd(Command):
     def install_argparse_arguments(self, parser):
         parser.add_argument('--file', help='path to the %s' % self.PACKAGE_NAME, required=False)
         parser.add_argument('--listen-address', help='the IP kairosdb listens to, which cannot be 0.0.0.0', required=True)
-        parser.add_argument('--cassandra_rpc_address', help='the RPC address of cassandra, which must be in the format of'
+        parser.add_argument('--cassandra-rpc-address', help='the RPC address of cassandra, which must be in the format of'
                                                             '\nIP:port, for example, 192.168.0.199:9160. If omitted, the'
                                                             '\naddress will be retrieved from local cassandra YAML config,'
                                                             '\nor an error will be raised if the YAML config cannot be found', required=False)
@@ -1692,12 +1692,12 @@ class InstallKairosdbCmd(Command):
                 all_configs.append(l)
 
         if args.cassandra_rpc_address and ':' not in args.cassandra_rpc_address:
-            raise CtlError('invalid --cassandra_rpc_address[%s]. It must be in the format of IP:port' % args.cassandra_rpc_address)
+            raise CtlError('invalid --cassandra-rpc-address[%s]. It must be in the format of IP:port' % args.cassandra_rpc_address)
         elif not args.cassandra_rpc_address:
             cassandra_conf = ctl.get_env(InstallCassandraCmd.CASSANDRA_CONF)
             if not cassandra_conf:
                 raise CtlError('cannot find cassandra conf[%s] in %s, have you installed cassandra? or'
-                               ' you can use --cassandra_rpc_address to set the address explicitly' % (InstallCassandraCmd.CASSANDRA_CONF, SetEnvironmentVariableCmd.PATH))
+                               ' you can use --cassandra-rpc-address to set the address explicitly' % (InstallCassandraCmd.CASSANDRA_CONF, SetEnvironmentVariableCmd.PATH))
 
             with open(cassandra_conf, 'r') as fd:
                 with on_error('cannot YAML load %s, it seems corrupted' % InstallCassandraCmd.CASSANDRA_CONF):
