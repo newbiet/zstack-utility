@@ -1527,7 +1527,7 @@ class InstallHACmd(Command):
     def __init__(self):
         super(InstallHACmd, self).__init__()
         self.name = "install_ha"
-        self.description = "install high availability environment for mevoco."
+        self.description =  "install high availability environment for Mevoco."
         ctl.register_command(self)
 
     def get_default_gateway(self):
@@ -4275,6 +4275,7 @@ def main():
     RestartNodeCmd()
     DeployCassandraDbCmd()
     ChangeIpCmd()
+    InstallHACmd()
 
     try:
         ctl.run()
