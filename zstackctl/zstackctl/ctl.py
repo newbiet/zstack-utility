@@ -1553,13 +1553,13 @@ class InstallHACmd(Command):
         parser.add_argument('--host1',
                             help="The first IP address for HA setup",
                             required=True)
-        parser.add_argument('--host1-root-password',
+        parser.add_argument('--host1-password',
                             help="The first host root password ",
                             required=True)
         parser.add_argument('--host2',
                             help="The second IP address for HA setup",
                             required=True)
-        parser.add_argument('--host2-root-password',
+        parser.add_argument('--host2-password',
                             help="The second host root password ",
                             required=True)
         parser.add_argument('--vip',
@@ -1588,7 +1588,22 @@ class InstallHACmd(Command):
         else:
             self.gateway_ip = args.gateway
 
+        # check root password is available
+        self.command ='sshpass -p %s ssh -q -o UserKnownHostsFile=/dev/null -o  PubkeyAuthentication=no -o ' \
+                      'StrictHostKeyChecking=no  root@%s echo 0' % (args.host1_password, args.host1)
+        self.rc = os.system(self.command)
+        if self.rc != 0:
+            print "The host: %s password %s  incorrect! please check it!" % (args.host1, args.host1_password)
+            sys.exit(1)
+        self.command ='sshpass -p %s ssh -q -o UserKnownHostsFile=/dev/null -o  PubkeyAuthentication=no -o ' \
+                      'StrictHostKeyChecking=no  root@%s echo 0' % (args.host2_password, args.host2)
+        self.rc = os.system(self.command)
+        if self.rc != 0:
+            print "The host: %s password %s  incorrect! please check it!" % (args.host2, args.host2_password)
+            sys.exit(1)
+
         #init variables
+        self.yum_repo = ctl.read_property('Ansible.var.yum_repo')
         self.current_dir = os.path.dirname(os.path.realpath(__file__))
         self.private_key_name = self.current_dir + "/conf/ha_key"
         self.public_key_name = self.current_dir + "/conf/ha_key.pub"
@@ -1596,7 +1611,6 @@ class InstallHACmd(Command):
             os.system("echo -e  'y\n'|ssh-keygen -q -t rsa -N "" -f %s" % self.private_key_name)
         with open(self.public_key_name) as self.public_key_file:
             self.public_key = self.public_key_file.read()
-            print self.public_key
         self.add_public_key_command = '''
 #!/bin/bash
 if [ ! -d ~/.ssh ]; then
@@ -1617,23 +1631,23 @@ if [ -x /sbin/restorecon ]; then
 fi
 exit 0
         ''' % (self.public_key, self.public_key, self.public_key)
+
         # add public key to host1
         self.ssh_add_public_key_command = "sshpass -p %s ssh -q -o UserKnownHostsFile=/dev/null -o " \
                                   "PubkeyAuthentication=no -o StrictHostKeyChecking=no  root@%s %s " % \
                                   (args.host1_root_password, args.host1, self.add_public_key_command)
         run_remote_command(self.ssh_add_public_key_command, self.host1_post_info)
+
         # add public key to host2
         self.ssh_add_public_key_command = "sshpass -p %s ssh -q -o UserKnownHostsFile=/dev/null -o " \
                                   "PubkeyAuthentication=no -o StrictHostKeyChecking=no  root@%s %s " % \
                                   (args.host2_root_password, args.host2, self.add_public_key_command)
         run_remote_command(self.ssh_add_public_key_command, self.host2_post_info)
-        self.yum_repo = ctl.read_property('Ansible.var.yum_repo')
-        self.mysql_password = args.mysql_root_password
-        self.mysql_userpassword= args.mysql_user_password
-        self.rabbit_password = args.rabbit_password
+
         # create log
         self.logger_dir = os.path.join(ctl.zstack_home, "../../logs/")
         create_log(self.logger_dir)
+
         # init host1 parameter
         self.host1_post_info = HostPostInfo()
         self.host1_post_info.host = args.host1
@@ -1672,12 +1686,13 @@ exit 0
         update_file("/etc/hosts", "line='%s zstack-2'" % self.host2, self.host1_post_info)
         update_file("/etc/hosts", "line='%s zstack-1'" % self.host1, self.host2_post_info)
         update_file("/etc/hosts", "line='%s zstack-2'" % self.host2, self.host2_post_info)
-
+        # todo add iptables only onece
         self.command = "iptables -I INPUT -s %s/32 -j ACCEPT && iptables-save > /dev/null 2>&1" % self.host2_post_info.host
         run_remote_command(self.command, self.host1_post_info)
         self.command = "iptables -I INPUT -s %s/32 -j ACCEPT && iptables-save > /dev/null 2>&1" % self.host1_post_info.host
         run_remote_command(self.command, self.host2_post_info)
 
+        #pass all the variables to other HA deploy process
         self.host_post_info_list = [self.host1_post_info, self.host2_post_info]
         # setup mysql ha
         MysqlHA(self.host_post_info_list)()
@@ -1688,29 +1703,27 @@ exit 0
 
         #install database on local management node
         self.command = "zstack-ctl deploydb --host=%s --port=3306 --zstack-password=%s --root-password=%s" \
-                       % (self.host1_post_info.host, self.host1_post_info.mysql_userpassword, self.host1_post_info.mysql_password)
+                       % (args.host1, args.mysql_userpassword, args.mysql_password)
         #os.system(self.command)
         run_remote_command(self.command, self.host1_post_info)
         self.command = "zstack-ctl configure DB.url=jdbc:mysql://%s:53306" % args.vip
         run_remote_command(self.command, self.host1_post_info)
-        self.command = "zstack-ctl configure CloudBus.rabbitmqPassword=%s" % self.host1_post_info.mysql_userpassword
+        self.command = "zstack-ctl configure CloudBus.rabbitmqPassword=%s" % args.mysql_userpassword
         run_remote_command(self.command, self.host1_post_info)
 
         # cassandra HA only need to change the config file, so unnecessary to wrap the process in a class
         update_file("%s/apache-cassandra-2.2.3/conf/cassandra.yaml" % ctl.USER_ZSTACK_HOME_DIR,
-                    "regexp='seeds:' line='seeds: \"%s,%s\"'" % (self.host1_post_info.host, self.host2_post_info.host),
-                    self.host1_post_info)
+                    "regexp='seeds:' line='seeds: \"%s,%s\"'" % (args.host1, args.host2), self.host1_post_info)
         update_file("%s/apache-cassandra-2.2.3/conf/cassandra.yaml" % ctl.USER_ZSTACK_HOME_DIR,
-                    "regexp='seeds:' line='seeds: \"%s,%s\"'" % (self.host2_post_info.host, self.host1_post_info.host),
-                    self.host2_post_info)
+                    "regexp='seeds:' line='seeds: \"%s,%s\"'" % (args.host2, args.host1,), self.host2_post_info)
 
         # kaiosdb HA only need to change the config file, so unnecessary to wrap the process in a class
         update_file("%s/kairosdb/conf/kairosdb.properties" % ctl.USER_ZSTACK_HOME_DIR,
                     "regexp='kairosdb\.datastore\.cassandra\.host_list' line='kairosdb.datastore.cassandra.host_list="
-                    "%s:9160,%s:9160'" % (self.host1_post_info.host, self.host2_post_info.host), self.host1_post_info)
+                    "%s:9160,%s:9160'" % (args.host1, args.host2), self.host1_post_info)
         update_file("%s/kairosdb/conf/kairosdb.properties" % ctl.USER_ZSTACK_HOME_DIR,
                     "regexp='kairosdb\.datastore\.cassandra\.host_list' line='kairosdb.datastore.cassandra.host_list="
-                    "%s:9160,%s:9160'" % (self.host2_post_info.host, self.host1_post_info.host), self.host2_post_info)
+                    "%s:9160,%s:9160'" % (args.host2, args.host1), self.host2_post_info)
 
         #copy zstack-1 property to zstack-2 and update the management.server.ip
         self.copy_arg = CopyArg()
@@ -1718,7 +1731,7 @@ exit 0
         self.copy_arg.dest = ctl.properties_file_path
         copy(self.copy_arg,self.host2_post_info)
         update_file("%s" % ctl.properties_file_path,
-                    "regexp='managementi\.server\.ip' line='management.server.ip = %s" % self.host2_post_info.host, self.host2_post_info)
+                    "regexp='management\.server\.ip' line='management.server.ip = %s" % args.host2, self.host2_post_info)
 
         #finally, start zstack-1 and zstack-2
         self.command = "zstack-ctl start"
@@ -1861,9 +1874,9 @@ listen  proxy-kairosdb 0.0.0.0:58080
         copy(self.copy_arg,self.host2_post_info)
 
         #config haproxy firewall
-        self.command = "iptables -A INPUT -p tcp -m tcp --dport 53306 -j ACCEPT && iptables -A INPUT -p tcp -m tcp --dport" \
-                       " 55672 -j ACCEPT && iptables -A INPUT -p tcp -m tcp --dport 80 -j ACCEPT && iptables -A INPUT -p" \
-                       " tcp -m tcp --dport 9132 -j ACCEPT && iptables -A INPUT -p tcp -m tcp --dport 6033 -j ACCEPT "
+        self.command = "iptables -I INPUT -p tcp -m tcp --dport 53306 -j ACCEPT && iptables -I INPUT -p tcp -m tcp --dport" \
+                       " 55672 -j ACCEPT && iptables -I INPUT -p tcp -m tcp --dport 80 -j ACCEPT && iptables -I INPUT -p" \
+                       " tcp -m tcp --dport 9132 -j ACCEPT && iptables -I INPUT -p tcp -m tcp --dport 6033 -j ACCEPT "
         run_remote_command(self.command, self.host1_post_info)
         run_remote_command(self.command, self.host2_post_info)
 

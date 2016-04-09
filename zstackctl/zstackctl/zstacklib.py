@@ -1403,8 +1403,8 @@ def main():
     #run_remote_command(command, host1_post_info)
     #command = "rabbitmqctl change_password zstack 'zstack123'"
     #run_remote_command(command, host1_post_info)
-    command = 'rabbitmqctl set_permissions -p \/ zstack ".*" ".*" ".*"'
-    run_remote_command(command, host1_post_info)
+    #command = 'rabbitmqctl set_permissions -p \/ zstack ".*" ".*" ".*"'
+    #run_remote_command(command, host1_post_info)
 
     #test
 #    command = '''
