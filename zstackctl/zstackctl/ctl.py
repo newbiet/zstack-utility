@@ -1672,6 +1672,7 @@ exit 0
         update_file("/etc/hosts", "line='%s zstack-2'" % self.host2, self.host1_post_info)
         update_file("/etc/hosts", "line='%s zstack-1'" % self.host1, self.host2_post_info)
         update_file("/etc/hosts", "line='%s zstack-2'" % self.host2, self.host2_post_info)
+
         self.command = "iptables -I INPUT -s %s/32 -j ACCEPT && iptables-save > /dev/null 2>&1" % self.host2_post_info.host
         run_remote_command(self.command, self.host1_post_info)
         self.command = "iptables -I INPUT -s %s/32 -j ACCEPT && iptables-save > /dev/null 2>&1" % self.host1_post_info.host

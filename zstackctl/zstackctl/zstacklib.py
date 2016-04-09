@@ -1213,25 +1213,25 @@ def main():
     # Reserve for test api
     import jinja2
 
-    host1_post_info = HostPostInfo()
-    host1_post_info.host_inventory = "/etc/ansible/hosts"
-    host1_post_info.host = "172.20.12.208"
-    host1_post_info.post_url = "http://172.20.12.64:1234"
-    host1_post_info.private_key = "/usr/local/zstack/apache-tomcat-7.0.35/webapps/zstack/WEB-INF/classes/ansible/rsaKeys/id_rsa"
-    host1_post_info.rabbit_password = "zstack123"
-    host1_post_info.mysql_password = "zstack123"
-    host1_post_info.mysql_userpassword = 'zstack123'
-    host2_post_info = HostPostInfo()
-    host2_post_info.host_inventory = "/etc/ansible/hosts"
-    host2_post_info.host = "172.20.12.83"
-    host2_post_info.post_url = "http://172.20.12.64:1234"
-    host2_post_info.private_key = "/usr/local/zstack/apache-tomcat-7.0.35/webapps/zstack/WEB-INF/classes/ansible/rsaKeys/id_rsa"
-    host2_post_info.rabbit_password = "zstack123"
-    host2_post_info.mysql_password = "zstack123"
-    host2_post_info.mysql_userpassword = "zstack123"
-    host1 = "172.20.12.208"
-    host2 = "172.20.12.83"
-    yum_repo = 'zstack-local'
+#    host1_post_info = HostPostInfo()
+#    host1_post_info.host_inventory = "/etc/ansible/hosts"
+#    host1_post_info.host = "172.20.12.208"
+#    host1_post_info.post_url = "http://172.20.12.64:1234"
+#    host1_post_info.private_key = "/usr/local/zstack/apache-tomcat-7.0.35/webapps/zstack/WEB-INF/classes/ansible/rsaKeys/id_rsa"
+#    host1_post_info.rabbit_password = "zstack123"
+#    host1_post_info.mysql_password = "zstack123"
+#    host1_post_info.mysql_userpassword = 'zstack123'
+#    host2_post_info = HostPostInfo()
+#    host2_post_info.host_inventory = "/etc/ansible/hosts"
+#    host2_post_info.host = "172.20.12.83"
+#    host2_post_info.post_url = "http://172.20.12.64:1234"
+#    host2_post_info.private_key = "/usr/local/zstack/apache-tomcat-7.0.35/webapps/zstack/WEB-INF/classes/ansible/rsaKeys/id_rsa"
+#    host2_post_info.rabbit_password = "zstack123"
+#    host2_post_info.mysql_password = "zstack123"
+#    host2_post_info.mysql_userpassword = "zstack123"
+#    host1 = "172.20.12.208"
+#    host2 = "172.20.12.83"
+#    yum_repo = 'zstack-local'
     #command = "mysql -uroot -pzstack.mysql.password -e 'exit' >/dev/null 2>&1"
     #command = '''
     #mysql -uroot -pzstack.mysql.password -Bse 'show databases;
@@ -1280,73 +1280,73 @@ def main():
 #
 # check mysql
 #
-    mysql_username = "zstack"
-    mysql_password = "zstack123"
-    mysqlchk_raw_script = '''
-    #!/bin/sh
-    MYSQL_HOST= {{ host1 }}
-    MYSQL_PORT="3306"
-    MYSQL_USERNAME= {{ mysql_username }}
-    MYSQL_PASSWORD= {{ mysql_password }}
-    /usr/bin/mysql -h$MYSQL_HOST -u$MYSQL_USERNAME -p$MYSQL_PASSWORD -e "show databases;" > /dev/null
-    if [ "$?" -eq 0 ]
-    then
-            # mysql is fine, return http 200
-            /bin/echo -e "HTTP/1.1 200 OK"
-            /bin/echo -e "Content-Type: Content-Type: text/plain"
-            /bin/echo -e "MySQL is running."
-    else
-            # mysql is fine, return http 503
-            /bin/echo -e "HTTP/1.1 503 Service Unavailable"
-            /bin/echo -e "Content-Type: Content-Type: text/plain"
-            /bin/echo -e "MySQL is *down*."
-    fi
-    '''
-    mysqlchk_template = jinja2.Template(mysqlchk_raw_script)
-    mysqlchk_script_host1 = mysqlchk_template.render({
-        'host1': host1_post_info.host,
-        'mysql_username': "zstack",
-        'mysql_password': host1_post_info.mysql_userpassword
-    })
-    mysqlchk_script_host2 = mysqlchk_template.render({
-        'host1': host2_post_info.host,
-        'mysql_username': "zstack",
-        'mysql_password': host2_post_info.mysql_userpassword
-    })
-
-    import tempfile
-    host1_config, mysqlchk_script_host1_file = tempfile.mkstemp()
-    f1 = os.fdopen(host1_config, 'w')
-    f1.write(mysqlchk_script_host1)
-    f1.close()
-
-    host2_config, mysqlchk_script_host2_file = tempfile.mkstemp()
-    f2 = os.fdopen(host2_config, 'w')
-    f2.write(mysqlchk_script_host2)
-    f2.close()
-    copy_arg = CopyArg()
-    copy_arg.src = mysqlchk_script_host1_file
-    copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
-    copy_arg.args = "mode='u+x,g+x,o+x'"
-    copy(copy_arg,host1_post_info)
-
-    copy_arg = CopyArg()
-    copy_arg.src = mysqlchk_script_host2_file
-    copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
-    copy_arg.args = "mode='u+x,g+x,o+x'"
-    copy(copy_arg,host2_post_info)
-
-    #config xinetd for service check
-    copy_arg = CopyArg()
-    copy_arg.src = "./conf/mysql-check"
-    copy_arg.dest = "/etc/xinetd.d/mysql-check"
-    copy(copy_arg,host1_post_info)
-    copy(copy_arg,host2_post_info)
-
-    # add service name
-    update_file("/etc/services", "line='mysqlcheck   6033/tcp'", host1_post_info)
-    update_file("/etc/services", "line='mysqlcheck   6033/tcp'", host2_post_info)
-
+#    mysql_username = "zstack"
+#    mysql_password = "zstack123"
+#    mysqlchk_raw_script = '''
+#    #!/bin/sh
+#    MYSQL_HOST= {{ host1 }}
+#    MYSQL_PORT="3306"
+#    MYSQL_USERNAME= {{ mysql_username }}
+#    MYSQL_PASSWORD= {{ mysql_password }}
+#    /usr/bin/mysql -h$MYSQL_HOST -u$MYSQL_USERNAME -p$MYSQL_PASSWORD -e "show databases;" > /dev/null
+#    if [ "$?" -eq 0 ]
+#    then
+#            # mysql is fine, return http 200
+#            /bin/echo -e "HTTP/1.1 200 OK"
+#            /bin/echo -e "Content-Type: Content-Type: text/plain"
+#            /bin/echo -e "MySQL is running."
+#    else
+#            # mysql is fine, return http 503
+#            /bin/echo -e "HTTP/1.1 503 Service Unavailable"
+#            /bin/echo -e "Content-Type: Content-Type: text/plain"
+#            /bin/echo -e "MySQL is *down*."
+#    fi
+#    '''
+#    mysqlchk_template = jinja2.Template(mysqlchk_raw_script)
+#    mysqlchk_script_host1 = mysqlchk_template.render({
+#        'host1': host1_post_info.host,
+#        'mysql_username': "zstack",
+#        'mysql_password': host1_post_info.mysql_userpassword
+#    })
+#    mysqlchk_script_host2 = mysqlchk_template.render({
+#        'host1': host2_post_info.host,
+#        'mysql_username': "zstack",
+#        'mysql_password': host2_post_info.mysql_userpassword
+#    })
+#
+#    import tempfile
+#    host1_config, mysqlchk_script_host1_file = tempfile.mkstemp()
+#    f1 = os.fdopen(host1_config, 'w')
+#    f1.write(mysqlchk_script_host1)
+#    f1.close()
+#
+#    host2_config, mysqlchk_script_host2_file = tempfile.mkstemp()
+#    f2 = os.fdopen(host2_config, 'w')
+#    f2.write(mysqlchk_script_host2)
+#    f2.close()
+#    copy_arg = CopyArg()
+#    copy_arg.src = mysqlchk_script_host1_file
+#    copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
+#    copy_arg.args = "mode='u+x,g+x,o+x'"
+#    copy(copy_arg,host1_post_info)
+#
+#    copy_arg = CopyArg()
+#    copy_arg.src = mysqlchk_script_host2_file
+#    copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
+#    copy_arg.args = "mode='u+x,g+x,o+x'"
+#    copy(copy_arg,host2_post_info)
+#
+#    #config xinetd for service check
+#    copy_arg = CopyArg()
+#    copy_arg.src = "./conf/mysql-check"
+#    copy_arg.dest = "/etc/xinetd.d/mysql-check"
+#    copy(copy_arg,host1_post_info)
+#    copy(copy_arg,host2_post_info)
+#
+#    # add service name
+#    update_file("/etc/services", "line='mysqlcheck   6033/tcp'", host1_post_info)
+#    update_file("/etc/services", "line='mysqlcheck   6033/tcp'", host2_post_info)
+#
     # start service
     command = "systemctl daemon-reload"
     run_remote_command(command,host1_post_info)
