@@ -1845,8 +1845,9 @@ listen  proxy-kairosdb 0.0.0.0:58080
 
         # The host1 and host2 use the same config file
         self.host1_config, self.haproxy_host1_conf_file = tempfile.mkstemp()
-        os.fdopen(self.host1_config, 'w').write(self.haproxy_host1_conf)
-        os.close(self.host1_config)
+        self.f1 = os.fdopen(self.host1_config, 'w')
+        self.f1.write(self.haproxy_host1_conf)
+        self.f1.close()
 
         def cleanup_haproxy_config_file():
             os.remove(self.haproxy_host1_conf_file)
@@ -1919,11 +1920,13 @@ vrrp_instance VI_1 {
         })
 
         self.host1_config, self.keepalived_host1_config_file = tempfile.mkstemp()
-        os.fdopen(self.host1_config, 'w').write(self.keepalived_host1_config)
+        self.f1 = os.fdopen(self.host1_config, 'w')
+        self.f1.write(self.keepalived_host1_config)
+        self.f1.close()
         self.host2_config, self.keepalived_host2_config_file = tempfile.mkstemp()
-        os.fdopen(self.host2_config, 'w').write(self.keepalived_host2_config)
-        os.close(self.host1_config)
-        os.close(self.host2_config)
+        self.f2 = os.fdopen(self.host1_config, 'w')
+        self.f2.write(self.keepalived_host2_config)
+        self.f2.close()
 
         def cleanup_keepalived_config_file():
             os.remove(self.keepalived_host1_config_file)
@@ -2001,6 +2004,7 @@ wsrep_notify_cmd=
 wsrep_sst_method=rsync
 '''
         self.galera_config_template = jinja2.Template(self.galera_raw_config)
+
         self.galera_config_host1 = self.galera_config_template.render({
             'host1' : self.host1_post_info.host,
             'host2' : self.host2_post_info.host
@@ -2012,11 +2016,14 @@ wsrep_sst_method=rsync
         })
 
         self.host1_config, self.galera_config_host1_file = tempfile.mkstemp()
-        os.fdopen(self.host1_config, 'w').write(self.galera_config_host1)
+        self.f1 = os.fdopen(self.host1_config, 'w')
+        self.f1.write(self.galera_config_host1)
+        self.f1.close()
+
         self.host2_config, self.galera_config_host2_file = tempfile.mkstemp()
-        os.fdopen(self.host2_config, 'w').write(self.galera_config_host2)
-        os.close(self.host1_config)
-        os.close(self.host2_config)
+        self.f2 = os.fdopen(self.host2_config, 'w')
+        self.f2.write(self.galera_config_host2)
+        self.f2.close()
 
         def cleanup_galera_config_file():
             os.remove(self.galera_config_host1_file)
@@ -2090,12 +2097,16 @@ fi
             'mysql_password' : self.host2_post_info.mysql_userpassword
         })
 
+
         self.host1_config, self.mysqlchk_script_host1_file = tempfile.mkstemp()
-        os.fdopen(self.host1_config, 'w').write(self.mysqlchk_script_host1)
+        self.f1 = os.fdopen(self.host1_config, 'w')
+        self.f1.write(self.mysqlchk_script_host1)
+        self.f1.close()
+
         self.host2_config, self.mysqlchk_script_host2_file = tempfile.mkstemp()
-        os.fdopen(self.host2_config, 'w').write(self.mysqlchk_script_host2)
-        os.close(self.host1_config)
-        os.close(self.host2_config)
+        self.f2 = os.fdopen(self.host2_config, 'w')
+        self.f2.write(self.mysqlchk_script_host2)
+        self.f2.close()
 
         def cleanup_mysqlchk_script():
             os.remove(self.mysqlchk_script_host1_file)
@@ -2107,6 +2118,7 @@ fi
         self.copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
         self.copy_arg.args = "mode='u+x,g+x,o+x'"
         copy(self.copy_arg,self.host1_post_info)
+
         self.copy_arg = CopyArg()
         self.copy_arg.src = self.mysqlchk_script_host2_file
         self.copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
@@ -2121,8 +2133,8 @@ fi
         copy(self.copy_arg,self.host2_post_info)
 
         # add service name
-        update_file("/etc/services", "line = 'mysqlcheck   6033/tcp'", self.host1_post_info)
-        update_file("/etc/services", "line = 'mysqlcheck   6033/tcp'", self.host2_post_info)
+        update_file("/etc/services", "line='mysqlcheck   6033/tcp'", self.host1_post_info)
+        update_file("/etc/services", "line='mysqlcheck   6033/tcp'", self.host2_post_info)
 
         # start service
         self.command = "systemctl daemon-reload"

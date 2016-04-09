@@ -1316,65 +1316,95 @@ def main():
 
     import tempfile
     host1_config, mysqlchk_script_host1_file = tempfile.mkstemp()
-    os.fdopen(host1_config, 'w').write(mysqlchk_script_host1)
-    host2_config, mysqlchk_script_host2_file = tempfile.mkstemp()
-    os.fdopen(host2_config, 'w').write(mysqlchk_script_host2)
-    os.close(host1_config)
-    os.close(host2_config)
+    f1 = os.fdopen(host1_config, 'w')
+    f1.write(mysqlchk_script_host1)
+    f1.close()
 
-    #
-    #test rabbitmq cluster
-    #
-    command = ("yum clean --enablerepo=zstack-local metadata && pkg_list=`rpm -q rabbitmq-server"
-               " | grep \"not installed\" | awk '{ print $2 }'` && for pkg in $pkg_list; do yum "
-               "--disablerepo=* --enablerepo=%s,mariadb install -y $pkg; done;") % yum_repo
-    run_remote_command(command, host1_post_info)
-    run_remote_command(command, host2_post_info)
-    # clear erlang process for new deploy
-    #command = "ps axu | grep -v 'grep'  | grep erlan |  awk '{ print $2 }' | xargs kill -9 && service rabbitmq-server stop"
-    command = "echo True || pkill -f .*erlang.*  > /dev/null 2>&1 && rm -rf /var/lib/rabbitmq/* && service rabbitmq-server stop "
-    run_remote_command(command, host1_post_info)
-    run_remote_command(command, host2_post_info)
-    #
-    service_status("rabbitmq-server","state=started", host1_post_info)
-    service_status("rabbitmq-server","state=stopped", host1_post_info)
-    fetch_arg=FetchArg()
-    fetch_arg.src = "/var/lib/rabbitmq/.erlang.cookie"
-    fetch_arg.dest = "/tmp/erlang.cookie"
-    fetch_arg.args = "fail_on_missing=yes flat=yes"
-    fetch(fetch_arg, host1_post_info)
+    host2_config, mysqlchk_script_host2_file = tempfile.mkstemp()
+    f2 = os.fdopen(host2_config, 'w')
+    f2.write(mysqlchk_script_host2)
+    f2.close()
+    copy_arg = CopyArg()
+    copy_arg.src = mysqlchk_script_host1_file
+    copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
+    copy_arg.args = "mode='u+x,g+x,o+x'"
+    copy(copy_arg,host1_post_info)
 
     copy_arg = CopyArg()
-    copy_arg.src = "/tmp/erlang.cookie"
-    copy_arg.dest = "/var/lib/rabbitmq/.erlang.cookie"
-    copy_arg.args = "owner=rabbitmq group=rabbitmq mode=400"
-    copy(copy_arg, host2_post_info)
+    copy_arg.src = mysqlchk_script_host2_file
+    copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
+    copy_arg.args = "mode='u+x,g+x,o+x'"
+    copy(copy_arg,host2_post_info)
 
-    service_status("rabbitmq-server", "state=started", host1_post_info)
-    service_status("rabbitmq-server", "state=started", host2_post_info)
-    #todo : check the cluster status
-    # add zstack2 to cluster
-    command = "rabbitmqctl stop_app"
-    run_remote_command(command, host2_post_info)
-    command = "rabbitmqctl join_cluster rabbit@zstack-1"
-    run_remote_command(command, host2_post_info)
-    command = "rabbitmqctl start_app"
-    run_remote_command(command, host2_post_info)
-    #todo : check the cluster status
-    # set policy let all nodes duplicate content
-    command = "rabbitmqctl set_policy ha-all '^(?!amq\.).*' '{\"ha-mode\": \"all\"}'"
-    run_remote_command(command, host1_post_info)
-    # add zstack user in this cluster
-    command = "rabbitmqctl add_user zstack 'zstack123'"
-    run_remote_command(command, host1_post_info)
-    command = "rabbitmqctl set_user_tags zstack administrator"
-    run_remote_command(command, host1_post_info)
-    command = "rabbitmqctl change_password zstack 'zstack123'"
-    run_remote_command(command, host1_post_info)
+    #config xinetd for service check
+    copy_arg = CopyArg()
+    copy_arg.src = "./conf/mysql-check"
+    copy_arg.dest = "/etc/xinetd.d/mysql-check"
+    copy(copy_arg,host1_post_info)
+    copy(copy_arg,host2_post_info)
+
+    # add service name
+    update_file("/etc/services", "line='mysqlcheck   6033/tcp'", host1_post_info)
+    update_file("/etc/services", "line='mysqlcheck   6033/tcp'", host2_post_info)
+
+    # start service
+    command = "systemctl daemon-reload"
+    run_remote_command(command,host1_post_info)
+    run_remote_command(command,host2_post_info)
+    service_status("xinetd","state=restarted enabled=yes",host1_post_info)
+    service_status("xinetd","state=restarted enabled=yes",host2_post_info)
+
+    ##
+    ##test rabbitmq cluster
+    ##
+    #command = ("yum clean --enablerepo=zstack-local metadata && pkg_list=`rpm -q rabbitmq-server"
+    #           " | grep \"not installed\" | awk '{ print $2 }'` && for pkg in $pkg_list; do yum "
+    #           "--disablerepo=* --enablerepo=%s,mariadb install -y $pkg; done;") % yum_repo
+    #run_remote_command(command, host1_post_info)
+    #run_remote_command(command, host2_post_info)
+    ## clear erlang process for new deploy
+    ##command = "ps axu | grep -v 'grep'  | grep erlan |  awk '{ print $2 }' | xargs kill -9 && service rabbitmq-server stop"
+    #command = "echo True || pkill -f .*erlang.*  > /dev/null 2>&1 && rm -rf /var/lib/rabbitmq/* && service rabbitmq-server stop "
+    #run_remote_command(command, host1_post_info)
+    #run_remote_command(command, host2_post_info)
+    ##
+    #service_status("rabbitmq-server","state=started", host1_post_info)
+    #service_status("rabbitmq-server","state=stopped", host1_post_info)
+    #fetch_arg=FetchArg()
+    #fetch_arg.src = "/var/lib/rabbitmq/.erlang.cookie"
+    #fetch_arg.dest = "/tmp/erlang.cookie"
+    #fetch_arg.args = "fail_on_missing=yes flat=yes"
+    #fetch(fetch_arg, host1_post_info)
+
+    #copy_arg = CopyArg()
+    #copy_arg.src = "/tmp/erlang.cookie"
+    #copy_arg.dest = "/var/lib/rabbitmq/.erlang.cookie"
+    #copy_arg.args = "owner=rabbitmq group=rabbitmq mode=400"
+    #copy(copy_arg, host2_post_info)
+
+    #service_status("rabbitmq-server", "state=started", host1_post_info)
+    #service_status("rabbitmq-server", "state=started", host2_post_info)
+    ##todo : check the cluster status
+    ## add zstack2 to cluster
+    #command = "rabbitmqctl stop_app"
+    #run_remote_command(command, host2_post_info)
+    #command = "rabbitmqctl join_cluster rabbit@zstack-1"
+    #run_remote_command(command, host2_post_info)
+    #command = "rabbitmqctl start_app"
+    #run_remote_command(command, host2_post_info)
+    ##todo : check the cluster status
+    ## set policy let all nodes duplicate content
+    #command = "rabbitmqctl set_policy ha-all '^(?!amq\.).*' '{\"ha-mode\": \"all\"}'"
+    #run_remote_command(command, host1_post_info)
+    ## add zstack user in this cluster
+    #command = "rabbitmqctl add_user zstack 'zstack123'"
+    #run_remote_command(command, host1_post_info)
+    #command = "rabbitmqctl set_user_tags zstack administrator"
+    #run_remote_command(command, host1_post_info)
+    #command = "rabbitmqctl change_password zstack 'zstack123'"
+    #run_remote_command(command, host1_post_info)
     command = 'rabbitmqctl set_permissions -p \/ zstack ".*" ".*" ".*"'
     run_remote_command(command, host1_post_info)
-
-
 
     #test
 #    command = '''
