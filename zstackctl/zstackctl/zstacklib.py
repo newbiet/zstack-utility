@@ -5,7 +5,6 @@ import os
 import sys
 import urllib2
 from urllib2 import URLError
-import json
 from datetime import datetime
 import logging
 import json
@@ -13,7 +12,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 # set global default value
 start_time = datetime.now()
-logger = logging.getLogger("deploy-agent-Log")
+logger = logging.getLogger("deploy-ha-Log")
 pip_url = ""
 zstack_root = ""
 host = ""
@@ -73,10 +72,14 @@ class AnsibleStartResult(object):
 class HostPostInfo(object):
     def __init__(self):
         self.host = None
+        self.vip= None
         self.post_url = None
         self.private_key = None
         self.host_inventory = None
         self.start_time = None
+        self.rabbit_password = None
+        self.mysql_password = None
+        self.mysql_userpassword = None
 
 
 class PipInstallArg(object):
@@ -89,6 +92,13 @@ class PipInstallArg(object):
 
 
 class CopyArg(object):
+    def __init__(self):
+        self.src = None
+        self.dest = None
+        self.args = None
+
+
+class FetchArg(object):
     def __init__(self):
         self.src = None
         self.dest = None
@@ -549,6 +559,49 @@ def copy(copy_arg, host_post_info):
             # pass the copy result to outside
             return change_status
 
+def fetch(fetch_arg, host_post_info):
+    start_time = datetime.now()
+    host_post_info.start_time = start_time
+    private_key = host_post_info.private_key
+    host_inventory = host_post_info.host_inventory
+    src = fetch_arg.src
+    dest = fetch_arg.dest
+    args = fetch_arg.args
+    host = host_post_info.host
+    post_url = host_post_info.post_url
+    handle_ansible_info("INFO: Starting fetch %s to %s ... " % (src, dest), host_post_info, "INFO")
+    if args is not None:
+        fetch_args = 'src=' + src + ' dest=' + dest + ' ' + args
+    else:
+        fetch_args = 'src=' + src + ' dest=' + dest
+
+    runner = ansible.runner.Runner(
+        host_list=host_inventory,
+        private_key_file=private_key,
+        module_name='fetch',
+        module_args=fetch_args,
+        pattern=host
+    )
+    result = runner.run()
+    logger.debug(result)
+    if result['contacted'] == {}:
+        ansible_start = AnsibleStartResult()
+        ansible_start.host = host
+        ansible_start.post_url = post_url
+        ansible_start.result = result
+        handle_ansible_start(ansible_start)
+        sys.exit(1)
+    else:
+        if 'failed' in result['contacted'][host]:
+            description = "ERROR: fetch file from %s to %s failed!" % (src, dest)
+            handle_ansible_failed(description, result, host_post_info)
+            sys.exit(1)
+        else:
+            change_status = "changed:" + str(result['contacted'][host]['changed'])
+            details = "SUCC: fetch %s to %s, the change status is %s" % (src, dest, change_status)
+            handle_ansible_info(details, host_post_info, "INFO")
+            # pass the fetch result to outside
+            return change_status
 
 def run_remote_command(command, host_post_info):
     counter = 0
@@ -598,6 +651,42 @@ def run_remote_command(command, host_post_info):
                     sys.exit(1)
     _run_remote_command(counter)
     return True
+
+def check_command_status(command, host_post_info):
+    start_time = datetime.now()
+    host_post_info.start_time = start_time
+    private_key = host_post_info.private_key
+    host_inventory = host_post_info.host_inventory
+    host = host_post_info.host
+    post_url = host_post_info.post_url
+    handle_ansible_info("INFO: Starting run command [ %s ] ..." % command, host_post_info, "INFO")
+    runner = ansible.runner.Runner(
+        host_list=host_inventory,
+        private_key_file=private_key,
+        module_name='shell',
+        module_args=command,
+        pattern=host
+    )
+    result = runner.run()
+    print result
+    logger.debug(result)
+    if result['contacted'] == {}:
+        ansible_start = AnsibleStartResult()
+        ansible_start.host = host
+        ansible_start.post_url = post_url
+        ansible_start.result = result
+        handle_ansible_start(ansible_start)
+        sys.exit(1)
+    else:
+        status = result['contacted'][host]['rc']
+        if status == 0:
+            details = "SUCC shell command: '%s' return 0 " % command
+            handle_ansible_info(details, host_post_info, "INFO")
+            return True
+        else:
+            description = "ERROR: shell command %s return 1" % command
+            handle_ansible_failed(description, result, host_post_info)
+            return False
 
 
 def check_pip_version(version, host_post_info):
@@ -668,6 +757,42 @@ def file_dir_exist(name, host_post_info):
             return True
         else:
             details = "INFO: %s not exist" % name
+            handle_ansible_info(details, host_post_info, "INFO")
+            return False
+
+
+def file_operation(file, args, host_post_info):
+    start_time = datetime.now()
+    host_post_info.start_time = start_time
+    private_key = host_post_info.private_key
+    host_inventory = host_post_info.host_inventory
+    host = host_post_info.host
+    post_url = host_post_info.post_url
+    handle_ansible_info("INFO: Starting change file %s ... " % file, host_post_info, "INFO")
+    runner = ansible.runner.Runner(
+        host_list=host_inventory,
+        private_key_file=private_key,
+        module_name='file',
+        module_args=args,
+        pattern=host
+    )
+    result = runner.run()
+    logger.debug(result)
+    if result['contacted'] == {}:
+        ansible_start = AnsibleStartResult()
+        ansible_start.host = host
+        ansible_start.post_url = post_url
+        ansible_start.result = result
+        handle_ansible_start(ansible_start)
+        sys.exit(1)
+    else:
+        status = result['contacted'][host]['rc']
+        if status == 0:
+            details = "INFO: %s changed successfully" % file
+            handle_ansible_info(details, host_post_info, "INFO")
+            return True
+        else:
+            details = "INFO: %s not be changed" % file
             handle_ansible_info(details, host_post_info, "INFO")
             return False
 
@@ -808,6 +933,7 @@ def service_status(name, args, host_post_info):
 
 
 def update_file(dest, args, host_post_info):
+    '''Use this function to change the file content'''
     start_time = datetime.now()
     host_post_info.start_time = start_time
     private_key = host_post_info.private_key
@@ -838,6 +964,42 @@ def update_file(dest, args, host_post_info):
             sys.exit(1)
         else:
             details = "SUCC: Update file %s" % dest
+            handle_ansible_info(details, host_post_info, "INFO")
+            return True
+
+
+def change_iptables(args, host_post_info):
+    start_time = datetime.now()
+    host_post_info.start_time = start_time
+    private_key = host_post_info.private_key
+    host_inventory = host_post_info.host_inventory
+    host = host_post_info.host
+    post_url = host_post_info.post_url
+    handle_ansible_info("INFO: Changing iptables", host_post_info, "INFO")
+    runner = ansible.runner.Runner(
+        host_list=host_inventory,
+        private_key_file=private_key,
+        module_name='iptables',
+        module_args=args,
+        pattern=host
+    )
+    result = runner.run()
+    print result
+    logger.debug(result)
+    if result['contacted'] == {}:
+        ansible_start = AnsibleStartResult()
+        ansible_start.host = host
+        ansible_start.post_url = post_url
+        ansible_start.result = result
+        handle_ansible_start(ansible_start)
+        sys.exit(1)
+    else:
+        if 'failed' in result['contacted'][host]:
+            description = "ERROR: change iptables: %s failed" % args
+            handle_ansible_failed(description, result, host_post_info)
+            sys.exit(1)
+        else:
+            details = "SUCC: change iptables with %s" % args
             handle_ansible_info(details, host_post_info, "INFO")
             return True
 
@@ -1049,19 +1211,163 @@ class ZstackLib(object):
 
 def main():
     # Reserve for test api
-    host_post_info = HostPostInfo()
-    host_post_info.host_inventory = "/etc/ansible/hosts"
-    host_post_info.host = "172.20.12.64"
-    host_post_info.post_url = "http://172.20.12.64:1234"
-    host_post_info.private_key = "/usr/local/zstack/apache-tomcat-7.0.35/webapps/zstack/WEB-INF/classes/ansible/rsaKeys/id_rsa"
-    #command = "mysql -uroot -psdfsdfs  -e 'exit' >/dev/null 2>&1"
+
+    host1_post_info = HostPostInfo()
+    host1_post_info.host_inventory = "/etc/ansible/hosts"
+    host1_post_info.host = "172.20.12.208"
+    host1_post_info.post_url = "http://172.20.12.64:1234"
+    host1_post_info.private_key = "/usr/local/zstack/apache-tomcat-7.0.35/webapps/zstack/WEB-INF/classes/ansible/rsaKeys/id_rsa"
+    host1_post_info.rabbit_password = "zstack123"
+    host1_post_info.mysql_password = "zstack123"
+    host1_post_info.mysql_userpassword = 'zstack123'
+    host2_post_info = HostPostInfo()
+    host2_post_info.host_inventory = "/etc/ansible/hosts"
+    host2_post_info.host = "172.20.12.83"
+    host2_post_info.post_url = "http://172.20.12.64:1234"
+    host2_post_info.private_key = "/usr/local/zstack/apache-tomcat-7.0.35/webapps/zstack/WEB-INF/classes/ansible/rsaKeys/id_rsa"
+    host2_post_info.rabbit_password = "zstack123"
+    host2_post_info.mysql_password = "zstack123"
+    host2_post_info.mysql_userpassword = "zstack123"
+    host1 = "172.20.12.208"
+    host2 = "172.20.12.83"
+    yum_repo = 'zstack-local'
+    #command = "mysql -uroot -pzstack.mysql.password -e 'exit' >/dev/null 2>&1"
     #command = '''
-    #mysql -uroot -pzstack.mysql.password -Bse "show databases;show databases;"
+    #mysql -uroot -pzstack.mysql.password -Bse 'show databases;
+    #show databases;
+    #use zstack_rest;
+    #show tables;
+    #select * from RestAPIVO where "uuid" = 123'
     #'''
-#    if check_remote(command, host_post_info) is True:
-#        print "succ"
-#    else:
-#        print "faild"
+
+#    command = "yum remove -y mariadb"
+#    run_remote_command(command, host1_post_info)
+#    run_remote_command(command, host2_post_info)
+#    command = "hostnamectl set-hostname zstack-1"
+#    run_remote_command(command, host1_post_info)
+#    command = "hostnamectl set-hostname zstack-2"
+#    run_remote_command(command, host2_post_info)
+#    update_file("/etc/hosts", "line='%s zstack-1'" % host1, host1_post_info)
+#    update_file("/etc/hosts", "line='%s zstack-2'" % host2, host1_post_info)
+#    update_file("/etc/hosts", "line='%s zstack-1'" % host1, host2_post_info)
+#    update_file("/etc/hosts", "line='%s zstack-2'" % host2, host2_post_info)
+#    command = "iptables -A INPUT -s %s/32 -j ACCEPT && iptables-save > /dev/null 2>&1" % host2_post_info.host
+#    run_remote_command(command, host1_post_info)
+#    command = "iptables -A INPUT -s %s/32 -j ACCEPT && iptables-save > /dev/null 2>&1" % host1_post_info.host
+#    run_remote_command(command, host2_post_info)
+#    command = ("yum clean --enablerepo=zstack-local metadata && pkg_list=`rpm -q MariaDB-Galera-server xinetd rsync openssl-libs "
+#                    " | grep \"not installed\" | awk '{ print $2 }'` && for pkg in $pkg_list; do yum "
+#                    "--disablerepo=* --enablerepo=%s,mariadb install -y $pkg; done;") % yum_repo
+#    run_remote_command(command, host1_post_info)
+#    run_remote_command(command, host2_post_info)
 #
+#    copy_arg = CopyArg()
+#    copy_arg.src = "/tmp/galera.cnf"
+#    copy_arg.dest = "/etc/my.cnf.d/galera.cnf"
+#    copy(copy_arg, host1_post_info)
+#    copy_arg = CopyArg()
+#    copy_arg.src = "/tmp/galera2.cnf"
+#    copy_arg.dest = "/etc/my.cnf.d/galera.cnf"
+#    copy(copy_arg, host2_post_info)
+#    command = "service mysql stop && service mysql bootstrap"
+#    run_remote_command(command, host1_post_info)
+#    command = "service mysql restart"
+#    run_remote_command(command, host2_post_info)
+#    command = "service mysql restart"
+#    run_remote_command(command, host1_post_info)
+
+
+    #test rabbitmq cluster
+    command = ("yum clean --enablerepo=zstack-local metadata && pkg_list=`rpm -q rabbitmq-server"
+               " | grep \"not installed\" | awk '{ print $2 }'` && for pkg in $pkg_list; do yum "
+               "--disablerepo=* --enablerepo=%s,mariadb install -y $pkg; done;") % yum_repo
+    run_remote_command(command, host1_post_info)
+    run_remote_command(command, host2_post_info)
+    # clear erlang process for new deploy
+    #command = "ps axu | grep -v 'grep'  | grep erlan |  awk '{ print $2 }' | xargs kill -9 && service rabbitmq-server stop"
+    command = "echo True || pkill -f .*erlang.*  > /dev/null 2>&1 && rm -rf /var/lib/rabbitmq/* && service rabbitmq-server stop "
+    run_remote_command(command, host1_post_info)
+    run_remote_command(command, host2_post_info)
+    #
+    service_status("rabbitmq-server","state=started", host1_post_info)
+    service_status("rabbitmq-server","state=stopped", host1_post_info)
+    fetch_arg=FetchArg()
+    fetch_arg.src = "/var/lib/rabbitmq/.erlang.cookie"
+    fetch_arg.dest = "/tmp/erlang.cookie"
+    fetch_arg.args = "fail_on_missing=yes flat=yes"
+    fetch(fetch_arg, host1_post_info)
+
+    copy_arg = CopyArg()
+    copy_arg.src = "/tmp/erlang.cookie"
+    copy_arg.dest = "/var/lib/rabbitmq/.erlang.cookie"
+    copy_arg.args = "owner=rabbitmq group=rabbitmq mode=400"
+    copy(copy_arg, host2_post_info)
+
+    service_status("rabbitmq-server", "state=started", host1_post_info)
+    service_status("rabbitmq-server", "state=started", host2_post_info)
+    #todo : check the cluster status
+    # add zstack2 to cluster
+    command = "rabbitmqctl stop_app"
+    run_remote_command(command, host2_post_info)
+    command = "rabbitmqctl join_cluster rabbit@zstack-1"
+    run_remote_command(command, host2_post_info)
+    command = "rabbitmqctl start_app"
+    run_remote_command(command, host2_post_info)
+    #todo : check the cluster status
+    # set policy let all nodes duplicate content
+    command = "rabbitmqctl set_policy ha-all '^(?!amq\.).*' '{\"ha-mode\": \"all\"}'"
+    run_remote_command(command, host1_post_info)
+    # add zstack user in this cluster
+    command = "rabbitmqctl add_user zstack 'zstack123'"
+    run_remote_command(command, host1_post_info)
+    command = "rabbitmqctl set_user_tags zstack administrator"
+    run_remote_command(command, host1_post_info)
+    command = "rabbitmqctl change_password zstack 'zstack123'"
+    run_remote_command(command, host1_post_info)
+    command = 'rabbitmqctl set_permissions -p \/ zstack ".*" ".*" ".*"'
+    run_remote_command(command, host1_post_info)
+    #test
+    command = '''
+#!/bin/bash
+if [ ! -d ~/.ssh ]; then
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+fi
+if [ ! -f ~/.ssh/authorized_keys ]; then
+touch ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+fi
+pub_key=%s
+grep %s ~/.ssh/authorized_keys > /dev/null
+if [ $? -eq 1 ]; then
+echo %s >> ~/.ssh/authorized_keys
+fi
+if [ -x /sbin/restorecon ]; then
+/sbin/restorecon ~/.ssh ~/.ssh/authorized_keys
+fi
+exit 0
+''' % ("123sdfsdfdsfs", "123sdfsdfdsfs", "123sdfsdfdsfs")
+    run_remote_command(command, host1_post_info)
+# todo : check the user privileges
+
+#command = '''
+    #        mysql -uroot -p -Bse 'grant ALL PRIVILEGES on *.* to zstack@"localhost" Identified by %s;
+    #        grant ALL PRIVILEGES on *.* to zstack@"zstack-1" Identified by %s;
+    #        grant ALL PRIVILEGES on *.* to zstack@"%%" Identified by %s;
+    #        grant ALL PRIVILEGES on *.* to root@"%%" Identified by %s;
+    #        grant ALL PRIVILEGES on *.* to root@"localhost" Identified by %s;
+    #        grant ALL PRIVILEGES ON *.* TO root@"%%" IDENTIFIED BY %s WITH GRANT OPTION;
+    #        flush privileges'
+    #        ''' % ("zstack123","zstack123","zstack123","zstack123","zstack123","zstack123")
+    #print command
+    #run_remote_command(command, host1_post_info)
+
+    #if init_install is True:
+    #    self.command = "mysql -uroot -p -Bse \"show status like 'wsrep_%';\""
+    #if check_command_status(command, host_post_info) is True:
+    #    print "succ"
+    #else:
+    #    print "faild"
+
 if __name__ == "__main__":
     main()
