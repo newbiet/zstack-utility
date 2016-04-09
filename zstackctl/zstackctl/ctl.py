@@ -2105,15 +2105,13 @@ fi
         self.copy_arg = CopyArg()
         self.copy_arg.src = self.mysqlchk_script_host1_file
         self.copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
+        self.copy_arg.args = "mode='u+x,g+x,o+x'"
         copy(self.copy_arg,self.host1_post_info)
-        self.command = "chmod +x /usr/local/bin/mysqlchk_status.sh"
-        run_remote_command(self.command,self.host1_post_info)
         self.copy_arg = CopyArg()
         self.copy_arg.src = self.mysqlchk_script_host2_file
         self.copy_arg.dest = "/usr/local/bin/mysqlchk_status.sh"
+        self.copy_arg.args = "mode='u+x,g+x,o+x'"
         copy(self.copy_arg,self.host2_post_info)
-        self.command = "chmod +x /usr/local/bin/mysqlchk_status.sh"
-        run_remote_command(self.command,self.host2_post_info)
 
         #config xinetd for service check
         self.copy_arg = CopyArg()

@@ -1211,6 +1211,7 @@ class ZstackLib(object):
 
 def main():
     # Reserve for test api
+    import jinja2
 
     host1_post_info = HostPostInfo()
     host1_post_info.host_inventory = "/etc/ansible/hosts"
@@ -1276,8 +1277,54 @@ def main():
 #    command = "service mysql restart"
 #    run_remote_command(command, host1_post_info)
 
+#
+# check mysql
+#
+    mysql_username = "zstack"
+    mysql_password = "zstack123"
+    mysqlchk_raw_script = '''
+    #!/bin/sh
+    MYSQL_HOST= {{ host1 }}
+    MYSQL_PORT="3306"
+    MYSQL_USERNAME= {{ mysql_username }}
+    MYSQL_PASSWORD= {{ mysql_password }}
+    /usr/bin/mysql -h$MYSQL_HOST -u$MYSQL_USERNAME -p$MYSQL_PASSWORD -e "show databases;" > /dev/null
+    if [ "$?" -eq 0 ]
+    then
+            # mysql is fine, return http 200
+            /bin/echo -e "HTTP/1.1 200 OK"
+            /bin/echo -e "Content-Type: Content-Type: text/plain"
+            /bin/echo -e "MySQL is running."
+    else
+            # mysql is fine, return http 503
+            /bin/echo -e "HTTP/1.1 503 Service Unavailable"
+            /bin/echo -e "Content-Type: Content-Type: text/plain"
+            /bin/echo -e "MySQL is *down*."
+    fi
+    '''
+    mysqlchk_template = jinja2.Template(mysqlchk_raw_script)
+    mysqlchk_script_host1 = mysqlchk_template.render({
+        'host1': host1_post_info.host,
+        'mysql_username': "zstack",
+        'mysql_password': host1_post_info.mysql_userpassword
+    })
+    mysqlchk_script_host2 = mysqlchk_template.render({
+        'host1': host2_post_info.host,
+        'mysql_username': "zstack",
+        'mysql_password': host2_post_info.mysql_userpassword
+    })
 
+    import tempfile
+    host1_config, mysqlchk_script_host1_file = tempfile.mkstemp()
+    os.fdopen(host1_config, 'w').write(mysqlchk_script_host1)
+    host2_config, mysqlchk_script_host2_file = tempfile.mkstemp()
+    os.fdopen(host2_config, 'w').write(mysqlchk_script_host2)
+    os.close(host1_config)
+    os.close(host2_config)
+
+    #
     #test rabbitmq cluster
+    #
     command = ("yum clean --enablerepo=zstack-local metadata && pkg_list=`rpm -q rabbitmq-server"
                " | grep \"not installed\" | awk '{ print $2 }'` && for pkg in $pkg_list; do yum "
                "--disablerepo=* --enablerepo=%s,mariadb install -y $pkg; done;") % yum_repo
@@ -1326,29 +1373,32 @@ def main():
     run_remote_command(command, host1_post_info)
     command = 'rabbitmqctl set_permissions -p \/ zstack ".*" ".*" ".*"'
     run_remote_command(command, host1_post_info)
+
+
+
     #test
-    command = '''
-#!/bin/bash
-if [ ! -d ~/.ssh ]; then
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-fi
-if [ ! -f ~/.ssh/authorized_keys ]; then
-touch ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-fi
-pub_key=%s
-grep %s ~/.ssh/authorized_keys > /dev/null
-if [ $? -eq 1 ]; then
-echo %s >> ~/.ssh/authorized_keys
-fi
-if [ -x /sbin/restorecon ]; then
-/sbin/restorecon ~/.ssh ~/.ssh/authorized_keys
-fi
-exit 0
-''' % ("123sdfsdfdsfs", "123sdfsdfdsfs", "123sdfsdfdsfs")
-    run_remote_command(command, host1_post_info)
-# todo : check the user privileges
+#    command = '''
+##!/bin/bash
+#if [ ! -d ~/.ssh ]; then
+#mkdir -p ~/.ssh
+#chmod 700 ~/.ssh
+#fi
+#if [ ! -f ~/.ssh/authorized_keys ]; then
+#touch ~/.ssh/authorized_keys
+#chmod 600 ~/.ssh/authorized_keys
+#fi
+#pub_key=%s
+#grep %s ~/.ssh/authorized_keys > /dev/null
+#if [ $? -eq 1 ]; then
+#echo %s >> ~/.ssh/authorized_keys
+#fi
+#if [ -x /sbin/restorecon ]; then
+#/sbin/restorecon ~/.ssh ~/.ssh/authorized_keys
+#fi
+#exit 0
+#''' % ("123sdfsdfdsfs", "123sdfsdfdsfs", "123sdfsdfdsfs")
+#    run_remote_command(command, host1_post_info)
+## todo : check the user privileges
 
 #command = '''
     #        mysql -uroot -p -Bse 'grant ALL PRIVILEGES on *.* to zstack@"localhost" Identified by %s;

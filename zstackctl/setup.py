@@ -23,7 +23,8 @@ zstack management tool""",
           'termcolor',
           'simplejson',
           'configobj',
-          'pyyaml'
+          'pyyaml',
+          'ansible'
           # -*- Extra requirements: -*-
       ],
       entry_points="""
