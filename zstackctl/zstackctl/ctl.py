@@ -1610,7 +1610,6 @@ class InstallHACmd(Command):
         self.yum_repo = ctl.read_property('Ansible.var.yum_repo')
         InstallHACmd.current_dir = os.path.dirname(os.path.realpath(__file__))
         self.private_key_name = self.current_dir + "/conf/ha_key"
-        print self.private_key_name
         self.public_key_name = self.current_dir + "/conf/ha_key.pub"
         if os.path.isfile(self.public_key_name) is not True:
             rc = os.system("echo -e  'y\n'|ssh-keygen -q -t rsa -N \"\" -f %s" % self.private_key_name)
@@ -1639,7 +1638,7 @@ class InstallHACmd(Command):
         self.host1_post_info.rabbit_password = args.rabbit_password
         self.host1_post_info.mysql_password = args.mysql_root_password
         self.host1_post_info.mysql_userpassword = args.mysql_user_password
-        self.host1_post_info.post_url = "http://172.20.12.64:1234"
+        self.host1_post_info.post_url = ""
 
         # init host2 parameter
         self.host2_post_info = HostPostInfo()
@@ -1652,7 +1651,7 @@ class InstallHACmd(Command):
         self.host2_post_info.rabbit_password = args.rabbit_password
         self.host2_post_info.mysql_password = args.mysql_root_password
         self.host2_post_info.mysql_userpassword = args.mysql_user_password
-        self.host2_post_info.post_url = "http://172.20.12.64:1234"
+        self.host2_post_info.post_url = ""
 
         self.add_public_key_command = ' if [ ! -d ~/.ssh ]; then mkdir -p ~/.ssh; chmod 700 ~/.ssh; fi && if [ ! -f ~/.ssh/authorized_keys ]; ' \
                                       'then touch ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys; fi && pub_key="%s";grep ' \
@@ -1709,7 +1708,7 @@ class InstallHACmd(Command):
         print "Starting to deploy Rabbitmq HA......"
         RabbitmqHA()()
         # setup haproxy and keepalived
-        print "Starting to deploy Haproxy and Keepalived......"
+        print "Starting to deploy Haproxy and Keepalived, please ignore below haproxy warning message......"
         HaproxyKeepalived()()
 
         #install database on local management node
@@ -1783,22 +1782,17 @@ class InstallHACmd(Command):
                                "ALTER KEYSPACE kairosdb WITH REPLICATION = { 'class' : 'SimpleStrategy','replication_factor' : 3 };CONSISTENCY ONE;"
         self.command = "%s/../../../apache-cassandra-2.2.3/bin/cqlsh %s 9042 -e \"%s\"" % (os.environ['ZSTACK_HOME'], args.host1, self.update_cassadra)
         run_remote_command(self.command, self.host1_post_info)
+        print "Cassandra and Kairosdb HA deploy successful!"
 
         #finally, start zstack-1 and zstack-2
         print "Staring Mevoco..."
+        self.command = "zstack-ctl install_ui"
+        run_remote_command(self.command, self.host1_post_info)
+        run_remote_command(self.command, self.host2_post_info)
         self.command = "zstack-ctl start"
         run_remote_command(self.command, self.host1_post_info)
-        self.command = "zstack-ctl install_ui"
-        run_remote_command(self.command, self.host1_post_info)
-        self.command = "zstack-ctl start_ui"
-        run_remote_command(self.command, self.host1_post_info)
-        self.command = "zstack-ctl start_node"
         run_remote_command(self.command, self.host2_post_info)
-        self.command = "zstack-ctl install_ui"
-        run_remote_command(self.command, self.host2_post_info)
-        self.command = "zstack-ctl start_ui"
-        run_remote_command(self.command, self.host2_post_info)
-        print "HA deploy finished, you can check the cluster status at http://%s:9132 with zstack:zstack123"
+        print "HA deploy finished, you can check the cluster status at http://%s:9132/zstack with user/passwd zstack/zstack123" % args.host1
 
 class HaproxyKeepalived(InstallHACmd):
     def __init__(self):
@@ -2146,7 +2140,6 @@ wsrep_sst_method=rsync
                           "flush privileges;'" % (self.host1_post_info.mysql_userpassword, self.host1_post_info.mysql_userpassword,
                                                  self.host1_post_info.mysql_userpassword,self.host1_post_info.mysql_password,
                                                  self.host1_post_info.mysql_password, self.host1_post_info.mysql_password)
-            print self.command
             run_remote_command(self.command, self.host1_post_info)
 
         # config mysqlchk_status.sh on zstack-1 and zstack-2
@@ -2299,6 +2292,7 @@ echo $TIMEST >> /var/log/check-network.log
         run_remote_command(self.command,self.host2_post_info)
         service_status("xinetd","state=restarted enabled=yes",self.host1_post_info)
         service_status("xinetd","state=restarted enabled=yes",self.host2_post_info)
+        print "Mysql HA deploy successful!"
 
 class RabbitmqHA(InstallHACmd):
     def __init__(self):
@@ -2359,8 +2353,7 @@ class RabbitmqHA(InstallHACmd):
         run_remote_command(self.command, self.host1_post_info)
         self.command = 'rabbitmqctl set_permissions -p \/ zstack ".*" ".*" ".*"'
         run_remote_command(self.command, self.host1_post_info)
-
-        # todo : check the user privileges
+        print "Rabbitmq HA deploy successful!"
 
 
 class InstallRabbitCmd(Command):
