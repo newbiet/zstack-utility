@@ -1621,7 +1621,6 @@ class InstallHACmd(Command):
             self.public_key = self.public_key_file.read()
         # create log
         self.logger_dir = os.path.join(ctl.zstack_home, "../../logs/")
-        print self.logger_dir
         create_log(self.logger_dir)
         # create inventory file
         with  open('%s/conf/host' % self.current_dir ,'w') as f:
@@ -1663,7 +1662,6 @@ class InstallHACmd(Command):
                                                                                                     self.public_key.strip('\n'))
 
         # add public key to host1
-        print self.add_public_key_command
         self.ssh_add_public_key_command = "sshpass -p %s ssh -q -o UserKnownHostsFile=/dev/null -o " \
                                   "PubkeyAuthentication=no -o StrictHostKeyChecking=no  root@%s '%s'" % \
                                   (args.host1_password, args.host1, self.add_public_key_command)
@@ -1690,9 +1688,11 @@ class InstallHACmd(Command):
         update_file("/etc/hosts", "line='%s zstack-1'" % args.host1, self.host2_post_info)
         update_file("/etc/hosts", "line='%s zstack-2'" % args.host2, self.host2_post_info)
         # todo add iptables only onece
-        self.command = "iptables -I INPUT -s %s/32 -j ACCEPT && iptables-save > /dev/null 2>&1" % self.host2_post_info.host
+        self.command = " ! iptables -C INPUT -s %s/32 -j ACCEPT >/dev/null 2>&1 && iptables -I INPUT -s %s/32 -j ACCEPT ; iptables-save" \
+                       " > /dev/null 2>&1" % (self.host2_post_info.host, self.host2_post_info.host)
         run_remote_command(self.command, self.host1_post_info)
-        self.command = "iptables -I INPUT -s %s/32 -j ACCEPT && iptables-save > /dev/null 2>&1" % self.host1_post_info.host
+        self.command = " ! iptables -C INPUT -s %s/32 -j ACCEPT >/dev/null 2>&1 && iptables -I INPUT -s %s/32 -j ACCEPT ; iptables-save " \
+                       "> /dev/null 2>&1" % (self.host1_post_info.host, self.host1_post_info.host)
         run_remote_command(self.command, self.host2_post_info)
 
         # stop haproxy and keepalived service for avoiding terminal status  disturb
@@ -1703,10 +1703,13 @@ class InstallHACmd(Command):
         #pass all the variables to other HA deploy process
         InstallHACmd.host_post_info_list = [self.host1_post_info, self.host2_post_info]
         # setup mysql ha
+        print "Starting to deploy Mysql HA......"
         MysqlHA()()
         # setup rabbitmq ha
+        print "Starting to deploy Rabbitmq HA......"
         RabbitmqHA()()
         # setup haproxy and keepalived
+        print "Starting to deploy Haproxy and Keepalived......"
         HaproxyKeepalived()()
 
         #install database on local management node
@@ -1723,6 +1726,7 @@ class InstallHACmd(Command):
         run_remote_command(self.command, self.host1_post_info)
 
         # cassandra HA only need to change the config file, so unnecessary to wrap the process in a class
+        print "Starting to deploy Cassandra HA......"
         update_file("%s/apache-cassandra-2.2.3/conf/cassandra.yaml" % ctl.USER_ZSTACK_HOME_DIR,
                     "regexp='seeds:' line='  - seeds: \"%s,%s\"'" % (args.host1, args.host2), self.host1_post_info)
         update_file("%s/apache-cassandra-2.2.3/conf/cassandra.yaml" % ctl.USER_ZSTACK_HOME_DIR,
@@ -1752,6 +1756,8 @@ class InstallHACmd(Command):
                     "regexp='^Cassandra\.contactPoints' line='Cassandra.contactPoints=%s,%s'" % (args.host1,args.host2), self.host1_post_info)
         update_file("%s" % ctl.properties_file_path,
                     "regexp='^Kairosdb.ip' line='Kairosdb.ip=%s'" % args.vip, self.host1_post_info)
+        update_file("%s" % ctl.properties_file_path,
+                    "regexp='^Kairosdb.port' line='Kairosdb.port=58080'", self.host1_post_info)
         self.copy_arg = CopyArg()
         self.copy_arg.src = ctl.properties_file_path
         self.copy_arg.dest = ctl.properties_file_path
@@ -1761,10 +1767,13 @@ class InstallHACmd(Command):
 
         # start Cassadra and KairosDB
         self.command = "zstack-ctl cassandra --start --wait-timeout 120"
-        run_remote_command(self.command, self.host1_post_info)
-        run_remote_command(self.command, self.host2_post_info)
-        self.command = "zstack-ctl deploy_cassandra_db"
-        run_remote_command(self.command, self.host1_post_info)
+        os.system("ssh -i %s root@%s 'zstack-ctl cassandra --start'" % (self.private_key_name, args.host1))
+        os.system("ssh -i %s root@%s 'zstack-ctl cassandra --start'" % (self.private_key_name, args.host2))
+        #run_remote_command_no_bash(self.command, self.host1_post_info)
+        #run_remote_command(self.command, self.host2_post_info)
+        #self.command = "zstack-ctl deploy_cassandra_db"
+        #run_remote_command(self.command, self.host1_post_info)
+        print "Starting to deploy Kairosdb HA......"
         self.command = "zstack-ctl kairosdb --start --wait-timeout 120"
         run_remote_command(self.command, self.host1_post_info)
         run_remote_command(self.command, self.host2_post_info)
@@ -1772,10 +1781,11 @@ class InstallHACmd(Command):
         # change Cassadra duplication number
         self.update_cassadra = "ALTER KEYSPACE zstack_billing WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 };" \
                                "ALTER KEYSPACE kairosdb WITH REPLICATION = { 'class' : 'SimpleStrategy','replication_factor' : 3 };CONSISTENCY ONE;"
-        self.command = "%s/../../../apache-cassandra-2.2.3/bin/cqlsh %s 9042 -e %s" % (os.environ['ZSTACK_HOME'], args.host1, self.update_cassadra)
+        self.command = "%s/../../../apache-cassandra-2.2.3/bin/cqlsh %s 9042 -e \"%s\"" % (os.environ['ZSTACK_HOME'], args.host1, self.update_cassadra)
         run_remote_command(self.command, self.host1_post_info)
 
         #finally, start zstack-1 and zstack-2
+        print "Staring Mevoco..."
         self.command = "zstack-ctl start"
         run_remote_command(self.command, self.host1_post_info)
         self.command = "zstack-ctl install_ui"
@@ -1788,6 +1798,7 @@ class InstallHACmd(Command):
         run_remote_command(self.command, self.host2_post_info)
         self.command = "zstack-ctl start_ui"
         run_remote_command(self.command, self.host2_post_info)
+        print "HA deploy finished, you can check the cluster status at http://%s:9132 with zstack:zstack123"
 
 class HaproxyKeepalived(InstallHACmd):
     def __init__(self):
@@ -1925,9 +1936,12 @@ listen  proxy-kairosdb 0.0.0.0:58080
         copy(self.copy_arg,self.host2_post_info)
 
         #config haproxy firewall
-        self.command = "iptables -I INPUT -p tcp -m tcp --dport 53306 -j ACCEPT && iptables -I INPUT -p tcp -m tcp --dport" \
-                       " 55672 -j ACCEPT && iptables -I INPUT -p tcp -m tcp --dport 80 -j ACCEPT && iptables -I INPUT -p" \
-                       " tcp -m tcp --dport 9132 -j ACCEPT && iptables -I INPUT -p tcp -m tcp --dport 6033 -j ACCEPT "
+        self.command = "! iptables -I INPUT -p tcp -m tcp --dport 53306 -j ACCEPT > /dev/null 2>&1 && iptables -I INPUT -p tcp -m tcp --dport 53306 -j ACCEPT; " \
+                       "! iptables -C INPUT -p tcp -m tcp --dport 55672 -j ACCEPT > /dev/null 2>&1  &&  iptables -I INPUT -p tcp -m tcp --dport 55672 -j ACCEPT ; " \
+                       "! iptables -C INPUT -p tcp -m tcp --dport 80 -j ACCEPT > /dev/null 2>&1  && iptables -I INPUT -p tcp -m tcp --dport 80 -j ACCEPT ; " \
+                       "! iptables -C INPUT -p tcp -m tcp --dport 9132 -j ACCEPT > /dev/null 2>&1 &&  iptables -I INPUT -p tcp -m tcp --dport 9132 -j ACCEPT ; " \
+                       "! iptables -C INPUT -p tcp -m tcp --dport 8888 -j ACCEPT > /dev/null 2>&1 &&  iptables -I INPUT -p tcp -m tcp --dport 8888 -j ACCEPT ; " \
+                       "! iptables -C INPUT -p tcp -m tcp --dport 6033 -j ACCEPT > /dev/null 2>&1 && iptables -I INPUT -p tcp -m tcp --dport 6033 -j ACCEPT; iptables-save "
         run_remote_command(self.command, self.host1_post_info)
         run_remote_command(self.command, self.host2_post_info)
 
@@ -2108,7 +2122,9 @@ wsrep_sst_method=rsync
         self.copy_arg.dest = "/etc/my.cnf.d/galera.cnf"
         copy(self.copy_arg, self.host2_post_info)
         # restart mysql service to enable galera config
-        self.command = "service mysql stop || service mysql bootstrap"
+        self.command = "service mysql stop || echo True"
+        run_remote_command(self.command, self.host1_post_info)
+        self.command = "service mysql bootstrap"
         run_remote_command(self.command, self.host1_post_info)
         self.command = "service mysql start"
         run_remote_command(self.command, self.host2_post_info)
@@ -2134,8 +2150,7 @@ wsrep_sst_method=rsync
             run_remote_command(self.command, self.host1_post_info)
 
         # config mysqlchk_status.sh on zstack-1 and zstack-2
-        self.mysqlchk_raw_script = '''
-#!/bin/sh
+        self.mysqlchk_raw_script = '''#!/bin/sh
 MYSQL_HOST="{{ host1 }}"
 MYSQL_PORT="3306"
 MYSQL_USERNAME="{{ mysql_username }}"
