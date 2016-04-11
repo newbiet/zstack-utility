@@ -1604,7 +1604,10 @@ class InstallHACmd(Command):
             print "The host: %s password %s  incorrect! please check it!" % (args.host2, args.host2_password)
             sys.exit(1)
 
-        #todo check image type
+        self.mevoco_image = os.path.isfile("/etc/yum.repos.d/zstack-local.repo")
+        if self.mevoco_image is False:
+            print "This command only support ZStack community Centos7 image"
+            sys.exit(1)
 
         #init variables
         self.yum_repo = ctl.read_property('Ansible.var.yum_repo')
