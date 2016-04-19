@@ -61,6 +61,7 @@ class GetVncPortResponse(kvmagent.AgentResponse):
     def __init__(self):
         super(GetVncPortResponse, self).__init__()
         self.port = None
+        self.protocol = None
 
 class StopVmCmd(kvmagent.AgentCommand):
     def __init__(self):
@@ -874,6 +875,11 @@ class Vm(object):
         for g in self.domain_xmlobject.devices.get_child_node_as_list('graphics'):
             if g.type_ == 'vnc' or g.type_ == 'spice':
                 return g.port_
+
+    def get_console_protocol(self):
+    	for g in self.domain_xmlobject.devices.get_child_node_as_list('graphics'):
+                return g.type_
+
 
         raise kvmagent.KvmError['no vnc console defined for vm[uuid:%s]' % self.uuid]
 
@@ -2033,6 +2039,8 @@ class VmPlugin(kvmagent.KvmAgent):
             vm = get_vm_by_uuid(cmd.vmUuid)
             port = vm.get_console_port()
             rsp.port = port
+            protocol = vm.get_console_protocol()
+            rsp.protocol = protocol
             logger.debug('successfully get vnc port[%s] of vm[uuid:%s]' % (port, cmd.uuid))
         except kvmagent.KvmError as e:
             logger.warn(linux.get_exception_stacktrace())
